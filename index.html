@@ -300,6 +300,7 @@
         <div class="teacher-notif-panel hidden" id="teacherNotifPanel"></div>
       </div>
       <button class="btn-add-student" onclick="openAddStudentModal()">➕ Add Student</button>
+      <button class="btn-manage-students" onclick="openStudentManagerModal()">✏️ Manage Students</button>
       <div class="user-pill"><div class="uavatar t">T</div><span id="tchName">Teacher</span></div>
       <button class="btn-logout" onclick="logout()">Log Out</button>
     </div>
@@ -418,6 +419,14 @@
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ══ STUDENT MANAGER MODAL — TEACHER ══ -->
+<div class="modal-overlay hidden" id="studentManagerModal" onclick="if(event.target===this)closeStudentManagerModal()">
+  <div class="modal-card" style="max-width:660px;padding:0;overflow:hidden;border-radius:24px;max-height:90vh;display:flex;flex-direction:column;">
+    <button class="modal-close" onclick="closeStudentManagerModal()">✕</button>
+    <div id="studentManagerContent" style="flex:1;overflow-y:auto;min-height:0;"></div>
   </div>
 </div>
 
