@@ -1680,6 +1680,8 @@ function saveQuarterGrades(classKey) {
   renderGradebook(currentFolder, currentSection);
 }
 
+
+
 /* ============================================================
    13. CLASS RECORD
    ============================================================ */
@@ -2208,3 +2210,881 @@ document.addEventListener("keydown", function(e) {
 
   console.log("✅ Asia Source iCollege — Portal Script loaded (DepEd-aligned: WW / PT / Quarterly Exam)");
 })();
+
+/* ════════════════════════════════════════════════
+   STUDENT MANAGER MODAL
+   ════════════════════════════════════════════════ */
+
+function openStudentManagerModal() {
+  renderStudentManagerModal();
+  var m = document.getElementById("studentManagerModal");
+  if (m) { m.classList.remove("hidden"); document.body.style.overflow = "hidden"; }
+}
+function closeStudentManagerModal() {
+  var m = document.getElementById("studentManagerModal");
+  if (m) { m.classList.add("hidden"); document.body.style.overflow = ""; }
+}
+
+var _stuMgrSearch = "";
+
+function renderStudentManagerModal() {
+  _stuMgrSearch = "";
+  var total = (DB.students || []).length;
+  var content = document.getElementById("studentManagerContent");
+  if (!content) return;
+
+  var html = '<div class="stm-wrap">';
+  html += '<div class="stm-header">';
+  html += '<div class="stm-header-icon">🎓</div>';
+  html += '<div class="stm-header-text"><h2 class="stm-title">Student Manager</h2><p class="stm-sub">Edit name, transfer strand, or remove students</p></div>';
+  html += '<div class="stm-counter"><span class="stm-counter-num" id="stmCounterNum">' + DB.students.length + '</span><span class="stm-counter-lbl">students</span></div>';
+  html += '</div>';
+  html += '<div class="stm-search-row"><div class="stm-search-box"><span class="stm-search-ico">🔍</span>';
+  html += '<input class="stm-search-input" type="text" id="stmSearch" placeholder="Search by name or email..." oninput="filterStudentManager()">';
+  html += '<button class="stm-search-clear hidden" id="stmClear" onclick="clearStmSearch()">✕</button></div></div>';
+  html += '<div class="stm-list" id="stmList">' + _buildStmListHtml("") + '</div></div>';
+
+  content.innerHTML = html;
+}
+
+// Replace the _buildStmListHtml function and related render functions
+
+function _buildStmListHtml(query) {
+  var q = (query || "").toLowerCase().trim();
+
+  // Build a complete student list: registered DB students + roster-only names
+  var allStudents = [];
+  var seenNames = {};
+
+  // First: all DB registered students
+  (DB.students || []).forEach(function(stu) {
+    seenNames[stu.name] = true;
+    allStudents.push({
+      id: stu.id,
+      name: stu.name,
+      emailUser: stu.emailUser || stu.email || "",
+      strand: stu.strand || "",
+      gender: stu.gender || "",
+      isRegistered: true,
+      bday: stu.bday || ""
+    });
+  });
+
+  // Second: roster-only students (not yet registered in DB)
+  var gradeKeys = ["G11","G12"];
+  var strandKeys = ["HUMSS-A","HUMSS-B","STEM-A","STEM-B","HE-HO-A","HE-HO-B","ICT-A","ABM-A"];
+  gradeKeys.forEach(function(gl) {
+    strandKeys.forEach(function(sk) {
+      var fullKey = gl + "-" + sk;
+      var roster  = DB.classRoster[fullKey];
+      if (!roster) return;
+      ["male","female"].forEach(function(gen) {
+        (roster[gen] || []).forEach(function(name) {
+          if (!seenNames[name]) {
+            seenNames[name] = true;
+            allStudents.push({
+              id: null,
+              name: name,
+              emailUser: "",
+              strand: fullKey,
+              gender: gen === "female" ? "Female" : "Male",
+              isRegistered: false,
+              bday: ""
+            });
+          }
+        });
+      });
+    });
+  });
+
+  // Sort by strand then name
+  allStudents.sort(function(a,b) {
+    if (a.strand < b.strand) return -1;
+    if (a.strand > b.strand) return  1;
+    return (a.name || "").localeCompare(b.name || "");
+  });
+
+  // Filter
+  if (q) {
+    allStudents = allStudents.filter(function(stu) {
+      return (stu.name || "").toLowerCase().indexOf(q) >= 0 ||
+             (stu.emailUser || "").toLowerCase().indexOf(q) >= 0 ||
+             (stu.strand || "").toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  if (!allStudents.length) {
+    return '<div class="stm-empty"><span class="stm-empty-icon">🔍</span><div>No students found' + (q ? ' for "' + query + '"' : '') + '</div></div>';
+  }
+
+  // Group by strand for section headers
+  var grouped = {}, groupOrder = [];
+  allStudents.forEach(function(stu) {
+    var key = stu.strand || "Unknown";
+    if (!grouped[key]) { grouped[key] = []; groupOrder.push(key); }
+    grouped[key].push(stu);
+  });
+
+  var html = "";
+  groupOrder.forEach(function(strandKey) {
+    var students = grouped[strandKey];
+    var glShort  = getGradeLevelShort(strandKey);
+    var sn       = getStrandName(strandKey);
+    var sec      = getSectionLetter(strandKey);
+    var glColor  = (strandKey && strandKey.indexOf("G11") >= 0) ? "#0ea5e9" : "#10b981";
+    var fullLabel = DB.strandFull[strandKey] || (glShort + " — " + sn + (sec ? " / Section " + sec : ""));
+
+    // Section group header
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 4px 6px;margin-top:4px;">' +
+      '<span style="background:' + glColor + '22;border:1px solid ' + glColor + '55;color:' + glColor + ';border-radius:20px;padding:3px 12px;font-size:10px;font-weight:800;letter-spacing:.5px;">' + glShort + '</span>' +
+      '<span style="font-size:12px;font-weight:700;color:var(--text);">' + (sn || strandKey) + (sec ? ' — Section ' + sec : '') + '</span>' +
+      '<span style="margin-left:auto;font-size:10px;color:var(--muted);">' + students.length + ' student' + (students.length !== 1 ? 's' : '') + '</span>' +
+      '<div style="flex:1;max-width:80px;height:1px;background:rgba(255,255,255,0.08);margin-left:8px;"></div>' +
+      '</div>';
+
+    students.forEach(function(stu, i) {
+      var nameHtml = stu.name;
+      if (q) {
+        var ni = stu.name.toLowerCase().indexOf(q);
+        if (ni >= 0) nameHtml = stu.name.slice(0,ni) + '<mark class="stm-hl">' + stu.name.slice(ni, ni+q.length) + '</mark>' + stu.name.slice(ni+q.length);
+      }
+
+      var statusBadge = stu.isRegistered
+        ? '<span style="background:rgba(0,230,118,0.12);border:1px solid rgba(0,230,118,0.3);color:#5dde92;border-radius:20px;padding:2px 8px;font-size:9px;font-weight:800;letter-spacing:.5px;">✓ Registered</span>'
+        : '<span style="background:rgba(255,184,0,0.1);border:1px solid rgba(255,184,0,0.3);color:var(--gold);border-radius:20px;padding:2px 8px;font-size:9px;font-weight:800;letter-spacing:.5px;">Roster Only</span>';
+
+      var genderIcon = (stu.gender && stu.gender.toLowerCase() === "female") ? "👩" : "🎓";
+
+      // Grade + Section pill
+      var gradePill = '<span style="background:' + glColor + '22;border:1px solid ' + glColor + '55;color:' + glColor + ';border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;">' +
+        glShort + (sec ? ' · Sec ' + sec : '') + '</span>';
+
+      var cardId = stu.id ? "stmCard_" + stu.id : "stmCard_r_" + strandKey + "_" + i;
+
+      html +=
+        '<div class="stm-card" id="' + cardId + '" style="position:relative;">' +
+          '<div class="stm-card-avatar">' + genderIcon + '</div>' +
+          '<div class="stm-card-info" style="flex:1;">' +
+            '<div class="stm-card-name" style="display:flex;align-items:center;flex-wrap:wrap;gap:5px;">' +
+              nameHtml + ' ' + gradePill + ' ' + statusBadge +
+            '</div>' +
+            (stu.emailUser ? '<div class="stm-card-email">' + stu.emailUser + '@asiasourceicollege.edu.ph</div>' : '<div class="stm-card-email" style="color:rgba(255,255,255,0.2);font-style:italic;">No account yet</div>') +
+            '<div class="stm-card-strand" style="display:flex;align-items:center;gap:6px;margin-top:2px;">' +
+              '<span style="font-size:10px;color:var(--gold);font-weight:700;">' + (fullLabel || strandKey) + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="stm-card-actions">' +
+            (stu.id ? '<button class="stm-btn stm-btn-edit" onclick="openEditStudentInline(\'' + stu.id + '\')">✏️ Edit</button>' : '') +
+            (stu.id ? '<button class="stm-btn stm-btn-delete" onclick="confirmDeleteStudent(\'' + stu.id + '\')">🗑️ Remove</button>' : '') +
+          '</div>' +
+        '</div>';
+    });
+  });
+
+  return html;
+}
+
+function _refreshStmList() {
+  var listEl = document.getElementById("stmList");
+  if (listEl) listEl.innerHTML = _buildStmListHtml(_stuMgrSearch);
+  // Count total unique students across DB + rosters
+  var seenNames = {};
+  (DB.students || []).forEach(function(s) { seenNames[s.name] = true; });
+  ["G11","G12"].forEach(function(gl) {
+    ["HUMSS-A","HUMSS-B","STEM-A","STEM-B","HE-HO-A","HE-HO-B","ICT-A","ABM-A"].forEach(function(sk) {
+      var r = DB.classRoster[gl+"-"+sk]; if (!r) return;
+      ["male","female"].forEach(function(g) { (r[g]||[]).forEach(function(n){seenNames[n]=true;}); });
+    });
+  });
+  var ctr = document.getElementById("stmCounterNum");
+  if (ctr) ctr.textContent = Object.keys(seenNames).length;
+}
+
+function filterStudentManager() {
+  var inp = document.getElementById("stmSearch");
+  _stuMgrSearch = inp ? inp.value : "";
+  var clr = document.getElementById("stmClear");
+  if (clr) clr.classList.toggle("hidden", !_stuMgrSearch);
+  _refreshStmList();
+}
+function clearStmSearch() {
+  var inp = document.getElementById("stmSearch"); if (inp) inp.value = "";
+  var clr = document.getElementById("stmClear");  if (clr) clr.classList.add("hidden");
+  _stuMgrSearch = ""; _refreshStmList();
+}
+
+function openEditStudentInline(stuId) {
+  var stu = findStudentById(stuId); if (!stu) return;
+  var card = document.getElementById("stmCard_" + stuId); if (!card) return;
+  var strandOpts = [
+    ["G11-HUMSS-A","G11 | HUMSS | Section A"],["G11-HUMSS-B","G11 | HUMSS | Section B"],
+    ["G11-STEM-A","G11 | STEM | Section A"],["G11-STEM-B","G11 | STEM | Section B"],
+    ["G11-HEHO-A","G11 | H.E-H.O | Section A"],["G11-HEHO-B","G11 | H.E-H.O | Section B"],
+    ["G11-ICT-A","G11 | ICT-CP"],["G11-ABM-A","G11 | ABM"],
+    ["G12-HUMSS-A","G12 | HUMSS | Section A"],["G12-HUMSS-B","G12 | HUMSS | Section B"],
+    ["G12-STEM-A","G12 | STEM | Section A"],["G12-STEM-B","G12 | STEM | Section B"],
+    ["G12-HEHO-A","G12 | H.E-H.O | Section A"],["G12-HEHO-B","G12 | H.E-H.O | Section B"],
+    ["G12-ICT-A","G12 | ICT-CP"],["G12-ABM-A","G12 | ABM"]
+  ];
+  var selHtml = '<select class="stm-edit-select" id="stmEditStrand_' + stuId + '">';
+  strandOpts.forEach(function(o) { selHtml += '<option value="' + o[0] + '"' + (stu.strand===o[0]?' selected':'') + '>' + o[1] + '</option>'; });
+  selHtml += '</select>';
+  card.innerHTML = '<div class="stm-edit-form">' +
+    '<div class="stm-edit-row"><label class="stm-edit-lbl">Full Name</label><input class="stm-edit-input" type="text" id="stmEditName_' + stuId + '" value="' + stu.name + '" placeholder="Student full name"></div>' +
+    '<div class="stm-edit-row"><label class="stm-edit-lbl">Gender</label><select class="stm-edit-select" id="stmEditGender_' + stuId + '"><option value=""' + (!stu.gender?' selected':'') + '>— Select —</option><option value="Male"' + (stu.gender==='Male'?' selected':'') + '>Male</option><option value="Female"' + (stu.gender==='Female'?' selected':'') + '>Female</option></select></div>' +
+    '<div class="stm-edit-row"><label class="stm-edit-lbl">Strand & Section</label>' + selHtml + '</div>' +
+    '<div class="stm-edit-actions"><button class="stm-btn stm-btn-save" onclick="saveEditStudent(\'' + stuId + '\')">💾 Save Changes</button><button class="stm-btn stm-btn-cancel" onclick="_refreshStmList()">✕ Cancel</button></div>' +
+    '</div>';
+}
+
+function saveEditStudent(stuId) {
+  var newName   = (document.getElementById("stmEditName_" + stuId)   || {}).value || "";
+  var newStrand = (document.getElementById("stmEditStrand_" + stuId) || {}).value || "";
+  var newGender = (document.getElementById("stmEditGender_" + stuId) || {}).value || "";
+  newName = newName.trim();
+  if (!newName)   { showToast("⚠️ Name cannot be empty.", "warning"); return; }
+  if (!newStrand) { showToast("⚠️ Please select a strand.", "warning"); return; }
+  var stu = findStudentById(stuId); if (!stu) return;
+  var oldName = stu.name, oldStrand = stu.strand;
+  for (var i = 0; i < DB.students.length; i++) {
+    if (DB.students[i].id === stuId) {
+      DB.students[i].name   = newName;
+      DB.students[i].strand = newStrand;
+      if (newGender) DB.students[i].gender = newGender;
+      break;
+    }
+  }
+  if (oldName !== newName)     _renameStudentInRosters(oldName, newName);
+  if (oldStrand !== newStrand) _transferStudentStrand(stu, oldStrand, newStrand, newName, newGender || stu.gender);
+  saveDB(); saveGrades();
+  var msg = '✅ ' + newName + ' updated!';
+  if (oldStrand !== newStrand) msg += ' → ' + (DB.strandFull[newStrand] || newStrand);
+  showToast(msg, 'success');
+  _refreshStmList();
+  if (typeof renderGradebook === 'function') renderGradebook(currentFolder, currentSection);
+}
+
+function _renameStudentInRosters(oldName, newName) {
+  for (var rk in DB.classRoster) {
+    ["male","female"].forEach(function(gen) {
+      var arr = DB.classRoster[rk][gen] || [];
+      for (var i = 0; i < arr.length; i++) { if (arr[i] === oldName) { arr[i] = newName; break; } }
+    });
+  }
+  for (var ck in rosterGrades) {
+    if (rosterGrades[ck][oldName] !== undefined) {
+      rosterGrades[ck][newName] = rosterGrades[ck][oldName];
+      delete rosterGrades[ck][oldName];
+    }
+  }
+}
+
+function _transferStudentStrand(stu, oldStrand, newStrand, newName, gender) {
+  var oldKey = strandToRosterKey(oldStrand);
+  var newKey = strandToRosterKey(newStrand);
+  if (oldKey && DB.classRoster[oldKey]) {
+    ["male","female"].forEach(function(g) {
+      DB.classRoster[oldKey][g] = (DB.classRoster[oldKey][g]||[]).filter(function(n){return n!==stu.name&&n!==newName;});
+    });
+  }
+  if (newKey) {
+    if (!DB.classRoster[newKey]) DB.classRoster[newKey] = {male:[],female:[]};
+    var g = (gender && gender.toLowerCase()==="female") ? "female" : "male";
+    var arr = DB.classRoster[newKey][g];
+    if (arr.indexOf(newName) < 0) arr.push(newName);
+  }
+}
+
+function confirmDeleteStudent(stuId) {
+  var stu = findStudentById(stuId); if (!stu) return;
+  var card = document.getElementById("stmCard_" + stuId); if (!card) return;
+  card.innerHTML = '<div class="stm-confirm-delete">' +
+    '<div class="stm-confirm-icon">⚠️</div>' +
+    '<div class="stm-confirm-text"><strong>Remove ' + stu.name + '?</strong><span>This will remove them from all rosters and grade records. This cannot be undone.</span></div>' +
+    '<div class="stm-confirm-actions">' +
+    '<button class="stm-btn stm-btn-danger" onclick="deleteStudent(\'' + stuId + '\')">🗑️ Yes, Remove</button>' +
+    '<button class="stm-btn stm-btn-cancel" onclick="_refreshStmList()">✕ Cancel</button>' +
+    '</div></div>';
+}
+
+function deleteStudent(stuId) {
+  var stu = findStudentById(stuId); if (!stu) { showToast("⚠️ Student not found.", "warning"); return; }
+  var stuName = stu.name;
+  DB.students = DB.students.filter(function(s) { return s.id !== stuId; });
+  for (var rk in DB.classRoster) {
+    ["male","female"].forEach(function(g) {
+      DB.classRoster[rk][g] = (DB.classRoster[rk][g]||[]).filter(function(n){return n!==stuName;});
+    });
+  }
+  for (var ck in rosterGrades) { if (rosterGrades[ck][stuName]) delete rosterGrades[ck][stuName]; }
+  saveInvites(loadInvites().filter(function(inv){return inv.studentId!==stuId;}));
+  saveDB(); saveGrades();
+  showToast('🗑️ ' + stuName + ' removed.', 'warning');
+  _refreshStmList();
+  if (typeof renderGradebook === 'function') renderGradebook(currentFolder, currentSection);
+}
+
+// ESC key close
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape") {
+    var m = document.getElementById("studentManagerModal");
+    if (m && !m.classList.contains("hidden")) closeStudentManagerModal();
+  }
+});
+
+/* ════════════════════════════════════════════════
+   STUDENT MANAGER MODAL — FULL REWRITE
+   - Shows ALL students (DB registered + roster-only)
+   - Grouped by Grade → Strand → Section
+   - Edit works for EVERYONE (name, gender, grade, strand, section)
+   - Transfer to any strand/section
+   ════════════════════════════════════════════════ */
+
+function openStudentManagerModal() {
+  renderStudentManagerModal();
+  var m = document.getElementById("studentManagerModal");
+  if (m) { m.classList.remove("hidden"); document.body.style.overflow = "hidden"; }
+}
+function closeStudentManagerModal() {
+  var m = document.getElementById("studentManagerModal");
+  if (m) { m.classList.add("hidden"); document.body.style.overflow = ""; }
+}
+
+var _stuMgrSearch = "";
+
+/* ── Build a unified master student list ── */
+function _buildMasterStudentList() {
+  var seen = {}, list = [];
+
+  /* 1) All DB-registered students */
+  (DB.students || []).forEach(function(stu) {
+    seen[stu.name] = true;
+    list.push({
+      id:           stu.id,
+      name:         stu.name,
+      emailUser:    stu.emailUser || stu.email || "",
+      strand:       stu.strand || "",
+      gender:       stu.gender || "",
+      isRegistered: true,
+      bday:         stu.bday || ""
+    });
+  });
+
+  /* 2) Roster-only names (no DB account yet) */
+  var allRosterKeys = [
+    "G11-HUMSS-A","G11-HUMSS-B","G11-STEM-A","G11-STEM-B",
+    "G11-HE-HO-A","G11-HE-HO-B","G11-ICT-A","G11-ABM-A",
+    "G12-HUMSS-A","G12-HUMSS-B","G12-STEM-A","G12-STEM-B",
+    "G12-HE-HO-A","G12-HE-HO-B","G12-ICT-A","G12-ABM-A"
+  ];
+  allRosterKeys.forEach(function(rk) {
+    var roster = DB.classRoster[rk]; if (!roster) return;
+    ["male","female"].forEach(function(gen) {
+      (roster[gen] || []).forEach(function(name) {
+        if (seen[name]) return;
+        seen[name] = true;
+        list.push({
+          id:           null,
+          name:         name,
+          emailUser:    "",
+          strand:       rk,
+          gender:       gen === "female" ? "Female" : "Male",
+          isRegistered: false,
+          bday:         ""
+        });
+      });
+    });
+  });
+
+  return list;
+}
+
+/* ── Total unique student count ── */
+function _countAllUniqueStudents() {
+  return _buildMasterStudentList().length;
+}
+
+function renderStudentManagerModal() {
+  _stuMgrSearch = "";
+  var content = document.getElementById("studentManagerContent");
+  if (!content) return;
+
+  var total = _countAllUniqueStudents();
+
+  var html = '<div class="stm-wrap">';
+
+  /* Header */
+  html += '<div class="stm-header">' +
+    '<div class="stm-header-icon">🎓</div>' +
+    '<div class="stm-header-text">' +
+      '<h2 class="stm-title">Student Manager</h2>' +
+      '<p class="stm-sub">Edit info, transfer strand/section, or remove students</p>' +
+    '</div>' +
+    '<div class="stm-counter">' +
+      '<span class="stm-counter-num" id="stmCounterNum">' + total + '</span>' +
+      '<span class="stm-counter-lbl">students</span>' +
+    '</div>' +
+  '</div>';
+
+  /* Search */
+  html += '<div class="stm-search-row">' +
+    '<div class="stm-search-box">' +
+      '<span class="stm-search-ico">🔍</span>' +
+      '<input class="stm-search-input" type="text" id="stmSearch" placeholder="Search by name, email, or strand..." oninput="filterStudentManager()">' +
+      '<button class="stm-search-clear hidden" id="stmClear" onclick="clearStmSearch()">✕</button>' +
+    '</div>' +
+  '</div>';
+
+  /* Stats bar */
+  var regCount    = (DB.students || []).length;
+  var rosterCount = total - regCount;
+  html += '<div style="display:flex;gap:0;padding:10px 20px 8px;background:rgba(0,0,0,0.2);border-bottom:1px solid rgba(255,255,255,0.06);">' +
+    '<div style="flex:1;text-align:center;border-right:1px solid rgba(255,255,255,0.08);">' +
+      '<div style="font-family:\'Cinzel\',serif;font-size:20px;font-weight:900;color:var(--gold);">' + total + '</div>' +
+      '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);">Total</div>' +
+    '</div>' +
+    '<div style="flex:1;text-align:center;border-right:1px solid rgba(255,255,255,0.08);">' +
+      '<div style="font-family:\'Cinzel\',serif;font-size:20px;font-weight:900;color:#5dde92;">' + regCount + '</div>' +
+      '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);">Registered</div>' +
+    '</div>' +
+    '<div style="flex:1;text-align:center;">' +
+      '<div style="font-family:\'Cinzel\',serif;font-size:20px;font-weight:900;color:var(--gold);">' + rosterCount + '</div>' +
+      '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);">Roster Only</div>' +
+    '</div>' +
+  '</div>';
+
+  html += '<div class="stm-list" id="stmList">' + _buildStmListHtml("") + '</div>';
+  html += '</div>';
+
+  content.innerHTML = html;
+}
+
+/* ── Strand option list ── */
+var STM_STRAND_OPTS = [
+  ["G11-HUMSS-A","G11 | HUMSS | Section A"],
+  ["G11-HUMSS-B","G11 | HUMSS | Section B"],
+  ["G11-STEM-A", "G11 | STEM  | Section A"],
+  ["G11-STEM-B", "G11 | STEM  | Section B"],
+  ["G11-HE-HO-A","G11 | H.E-H.O | Section A"],
+  ["G11-HE-HO-B","G11 | H.E-H.O | Section B"],
+  ["G11-ICT-A",  "G11 | ICT-CP"],
+  ["G11-ABM-A",  "G11 | ABM"],
+  ["G12-HUMSS-A","G12 | HUMSS | Section A"],
+  ["G12-HUMSS-B","G12 | HUMSS | Section B"],
+  ["G12-STEM-A", "G12 | STEM  | Section A"],
+  ["G12-STEM-B", "G12 | STEM  | Section B"],
+  ["G12-HE-HO-A","G12 | H.E-H.O | Section A"],
+  ["G12-HE-HO-B","G12 | H.E-H.O | Section B"],
+  ["G12-ICT-A",  "G12 | ICT-CP"],
+  ["G12-ABM-A",  "G12 | ABM"]
+];
+
+function _strandSelectHtml(inputId, currentStrand) {
+  var html = '<select class="stm-edit-select" id="' + inputId + '">';
+  var g11opts = STM_STRAND_OPTS.filter(function(o){return o[0].indexOf("G11")===0;});
+  var g12opts = STM_STRAND_OPTS.filter(function(o){return o[0].indexOf("G12")===0;});
+  html += '<optgroup label="── GRADE 11 ──">';
+  g11opts.forEach(function(o){ html += '<option value="'+o[0]+'"'+(currentStrand===o[0]?' selected':'')+'>'+o[1]+'</option>'; });
+  html += '</optgroup><optgroup label="── GRADE 12 ──">';
+  g12opts.forEach(function(o){ html += '<option value="'+o[0]+'"'+(currentStrand===o[0]?' selected':'')+'>'+o[1]+'</option>'; });
+  html += '</optgroup></select>';
+  return html;
+}
+
+/* ── Build list HTML ── */
+function _buildStmListHtml(query) {
+  var q    = (query || "").toLowerCase().trim();
+  var all  = _buildMasterStudentList();
+
+  /* Filter */
+  if (q) {
+    all = all.filter(function(stu) {
+      return (stu.name      || "").toLowerCase().indexOf(q) >= 0 ||
+             (stu.emailUser || "").toLowerCase().indexOf(q) >= 0 ||
+             (stu.strand    || "").toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  if (!all.length) {
+    return '<div class="stm-empty"><span class="stm-empty-icon">🔍</span>' +
+           '<div>No students found' + (q ? ' for "' + query + '"' : '') + '</div></div>';
+  }
+
+  /* Sort: grade → strand → section → name */
+  all.sort(function(a,b) {
+    var sa = a.strand || "ZZZ", sb = b.strand || "ZZZ";
+    if (sa < sb) return -1; if (sa > sb) return 1;
+    return (a.name||"").localeCompare(b.name||"");
+  });
+
+  /* Group by strand */
+  var grouped = {}, groupOrder = [];
+  all.forEach(function(stu) {
+    var key = stu.strand || "Unknown";
+    if (!grouped[key]) { grouped[key] = []; groupOrder.push(key); }
+    grouped[key].push(stu);
+  });
+
+  var html = "";
+
+
+  groupOrder.forEach(function(strandKey) {
+    var students  = grouped[strandKey];
+    var glShort   = getGradeLevelShort(strandKey);
+    var sn        = getStrandName(strandKey);
+    var sec       = getSectionLetter(strandKey);
+    var glColor   = (strandKey.indexOf("G11") === 0) ? "#0ea5e9" : "#10b981";
+    var fullLabel = DB.strandFull[strandKey] ||
+                   (glShort + " — " + sn + (sec ? " / Section " + sec : ""));
+
+    /* Section group header */
+    html +=
+      '<div style="display:flex;align-items:center;gap:8px;padding:12px 4px 5px;margin-top:4px;">' +
+        '<span style="background:' + glColor + '22;border:1px solid ' + glColor + '55;' +
+               'color:' + glColor + ';border-radius:20px;padding:3px 14px;' +
+               'font-size:10px;font-weight:800;letter-spacing:.5px;white-space:nowrap;">' +
+          glShort +
+        '</span>' +
+        '<span style="font-size:12px;font-weight:800;color:var(--text);white-space:nowrap;">' +
+          (sn || strandKey) + (sec ? ' — Section ' + sec : '') +
+        '</span>' +
+        '<div style="flex:1;height:1px;background:rgba(255,255,255,0.07);margin:0 4px;"></div>' +
+        '<span style="font-size:10px;color:var(--muted);white-space:nowrap;">' +
+          students.length + ' student' + (students.length !== 1 ? 's' : '') +
+        '</span>' +
+      '</div>';
+
+    students.forEach(function(stu, i) {
+      var nameHtml = stu.name;
+      if (q) {
+        var ni = stu.name.toLowerCase().indexOf(q);
+        if (ni >= 0) nameHtml = stu.name.slice(0,ni) +
+          '<mark class="stm-hl">' + stu.name.slice(ni, ni+q.length) + '</mark>' +
+          stu.name.slice(ni+q.length);
+      }
+
+      var statusBadge = stu.isRegistered
+        ? '<span style="background:rgba(0,230,118,0.12);border:1px solid rgba(0,230,118,0.3);' +
+               'color:#5dde92;border-radius:20px;padding:2px 8px;font-size:9px;font-weight:800;">✓ Registered</span>'
+        : '<span style="background:rgba(255,184,0,0.1);border:1px solid rgba(255,184,0,0.3);' +
+               'color:var(--gold);border-radius:20px;padding:2px 8px;font-size:9px;font-weight:800;">Roster Only</span>';
+
+      var genderIcon = (stu.gender && stu.gender.toLowerCase() === "female") ? "👩" : "🎓";
+
+      /* Grade + Section pill */
+      var gradePill =
+        '<span style="background:' + glColor + '22;border:1px solid ' + glColor + '55;' +
+               'color:' + glColor + ';border-radius:6px;padding:2px 9px;' +
+               'font-size:9.5px;font-weight:800;white-space:nowrap;">' +
+          glShort + (sec ? ' · Sec ' + sec : '') +
+        '</span>';
+
+      /* Unique card ID — roster-only uses name+strand */
+      var safeId   = stu.id ? stu.id : ("_r_" + strandKey + "_" + i);
+      var cardId   = "stmCard_" + safeId;
+
+      /* Edit / Delete buttons — everyone gets Edit, only registered get Delete */
+      var actionBtns =
+          '<button class="stm-btn stm-btn-edit" ' +
+         'onclick="openEditStudentInline(\'' + safeId + '\',\'' +
+         stu.name.replace(/'/g,"\\'") + '\',\'' +
+         stu.strand + '\',\'' +
+         (stu.gender||"") + '\')" ' +
+         'style="white-space:nowrap;">✏️ Edit</button>' +
+        (stu.id
+        ? '<button class="stm-btn stm-btn-delete" onclick="confirmDeleteStudent(\'' + stu.id + '\')" style="white-space:nowrap;">🗑️ Remove</button>'
+        : '<button class="stm-btn stm-btn-delete" onclick="confirmRemoveRosterStudent(\'' + stu.name.replace(/'/g,"\\'") + '\',\'' + stu.strand + '\')" style="white-space:nowrap;">🗑️ Remove</button>');
+
+
+      html +=
+        '<div class="stm-card" id="' + cardId + '">' +
+          '<div class="stm-card-avatar">' + genderIcon + '</div>' +
+          '<div class="stm-card-info">' +
+            '<div class="stm-card-name">' +
+              nameHtml + ' ' + gradePill + ' ' + statusBadge +
+            '</div>' +
+            (stu.emailUser
+              ? '<div class="stm-card-email">' + stu.emailUser + '@asiasourceicollege.edu.ph</div>'
+              : '<div class="stm-card-email" style="color:rgba(255,255,255,0.2);font-style:italic;">No account yet</div>') +
+            '<div class="stm-card-strand">' + fullLabel + '</div>' +
+          '</div>' +
+          '<div class="stm-card-actions">' + actionBtns + '</div>' +
+        '</div>';
+    });
+  });
+
+  return html;
+}
+
+
+
+/* ── Refresh helper ── */
+function _refreshStmList() {
+  var listEl = document.getElementById("stmList");
+  if (listEl) listEl.innerHTML = _buildStmListHtml(_stuMgrSearch);
+  var ctr = document.getElementById("stmCounterNum");
+  if (ctr) ctr.textContent = _countAllUniqueStudents();
+}
+
+/* ── Search / Clear ── */
+function filterStudentManager() {
+  var inp = document.getElementById("stmSearch");
+  _stuMgrSearch = inp ? inp.value : "";
+  var clr = document.getElementById("stmClear");
+  if (clr) clr.classList.toggle("hidden", !_stuMgrSearch);
+  _refreshStmList();
+}
+function clearStmSearch() {
+  var inp = document.getElementById("stmSearch"); if (inp) inp.value = "";
+  var clr = document.getElementById("stmClear");  if (clr) clr.classList.add("hidden");
+  _stuMgrSearch = ""; _refreshStmList();
+}
+
+/* ════════════════════════════════════════════════
+   INLINE EDIT — works for BOTH registered & roster-only
+   safeId  = stu.id OR "_r_strandKey_index"
+   ════════════════════════════════════════════════ */
+function openEditStudentInline(safeId, currentName, currentStrand, currentGender) {
+  var cardId = "stmCard_" + safeId;
+  var card   = document.getElementById(cardId);
+  if (!card) return;
+
+  /* Build strand select */
+  var strandSel = _strandSelectHtml("stmEditStrand_" + safeId, currentStrand);
+
+  card.innerHTML =
+    '<div class="stm-edit-form" style="width:100%;">' +
+
+      /* Row 1: Name + Gender */
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
+        '<div class="stm-edit-row">' +
+          '<label class="stm-edit-lbl">Full Name</label>' +
+          '<input class="stm-edit-input" type="text" id="stmEditName_' + safeId + '" ' +
+                 'value="' + (currentName || "").replace(/"/g,"&quot;") + '" placeholder="Student full name">' +
+        '</div>' +
+        '<div class="stm-edit-row">' +
+          '<label class="stm-edit-lbl">Gender</label>' +
+          '<select class="stm-edit-select" id="stmEditGender_' + safeId + '">' +
+            '<option value=""' + (!currentGender ? ' selected' : '') + '>— Select —</option>' +
+            '<option value="Male"'   + (currentGender === 'Male'   ? ' selected' : '') + '>Male</option>' +
+            '<option value="Female"' + (currentGender === 'Female' ? ' selected' : '') + '>Female</option>' +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+
+      /* Row 2: Strand / Grade / Section (full width) */
+      '<div class="stm-edit-row">' +
+        '<label class="stm-edit-lbl">🎓 Grade, Strand &amp; Section — Transfer Here</label>' +
+        strandSel +
+      '</div>' +
+
+      /* Transfer notice */
+      '<div id="stmTransferNotice_' + safeId + '" style="display:none;' +
+           'background:rgba(255,184,0,0.08);border:1px solid rgba(255,184,0,0.3);' +
+           'border-radius:10px;padding:8px 12px;font-size:11px;color:var(--gold);">' +
+        '⚡ Changing strand will move this student to the new class roster.' +
+      '</div>' +
+
+      /* Actions */
+      '<div class="stm-edit-actions">' +
+        '<button class="stm-btn stm-btn-save" ' +
+                'onclick="saveEditStudentUniversal(\'' + safeId + '\',\'' +
+                (currentName || "").replace(/'/g,"\\'") + '\',\'' +
+                currentStrand + '\')">' +
+          '💾 Save Changes' +
+        '</button>' +
+        '<button class="stm-btn stm-btn-cancel" onclick="_refreshStmList()">✕ Cancel</button>' +
+      '</div>' +
+
+    '</div>';
+
+  /* Show transfer notice when strand changes */
+  var selEl = document.getElementById("stmEditStrand_" + safeId);
+  if (selEl) {
+    selEl.addEventListener("change", function() {
+      var notice = document.getElementById("stmTransferNotice_" + safeId);
+      if (notice) notice.style.display = (this.value !== currentStrand) ? "" : "none";
+    });
+  }
+}
+
+/* ── Universal save — handles BOTH registered & roster-only ── */
+function saveEditStudentUniversal(safeId, oldName, oldStrand) {
+  var newName   = (document.getElementById("stmEditName_"   + safeId) || {}).value || "";
+  var newStrand = (document.getElementById("stmEditStrand_" + safeId) || {}).value || "";
+  var newGender = (document.getElementById("stmEditGender_" + safeId) || {}).value || "";
+  newName = newName.trim();
+
+  if (!newName)   { showToast("⚠️ Name cannot be empty.", "warning"); return; }
+  if (!newStrand) { showToast("⚠️ Please select a strand.", "warning"); return; }
+
+  var isRegistered = safeId.indexOf("_r_") !== 0;
+  var changed      = [];
+
+  if (isRegistered) {
+    for (var i = 0; i < DB.students.length; i++) {
+      if (DB.students[i].id === safeId) {
+        if (DB.students[i].name   !== newName)   changed.push("name");
+        if (DB.students[i].strand !== newStrand) changed.push("strand → " + (DB.strandFull[newStrand] || newStrand));
+        DB.students[i].name   = newName;
+        DB.students[i].strand = newStrand;
+        if (newGender) DB.students[i].gender = newGender;
+        break;
+      }
+    }
+    if (oldName !== newName)     _renameStudentInRosters(oldName, newName);
+    if (oldStrand !== newStrand) _transferStudentStrand({ name: oldName }, oldStrand, newStrand, newName, newGender);
+  } else {
+    if (oldName !== newName)     _renameStudentInRosters(oldName, newName);
+    if (oldStrand !== newStrand) {
+      _removeNameFromRoster(oldName, oldStrand);
+      _addNameToRoster(newName, newStrand, newGender);
+      changed.push("strand → " + (DB.strandFull[newStrand] || newStrand));
+    } else if (oldName !== newName) {
+      _removeNameFromRoster(oldName, oldStrand);
+      _addNameToRoster(newName, newStrand, newGender || "male");
+    }
+    if (oldName !== newName) changed.push("name");
+  }
+
+  saveDB(); saveGrades();
+  var msg = '✅ ' + newName + ' updated!';
+  if (changed.length) msg += ' (' + changed.join(', ') + ')';
+  showToast(msg, 'success');
+  _refreshStmList();
+  if (typeof renderGradebook   === 'function') renderGradebook(currentFolder, currentSection);
+  if (typeof renderClassRecord === 'function') renderClassRecord(currentFolder, currentSection);
+}
+
+function _removeNameFromRoster(name, strand) {
+  var keys = [strand, strand.replace("HEHO","HE-HO"), strand.replace("HE-HO","HEHO")];
+  keys.forEach(function(rk) {
+    if (!DB.classRoster[rk]) return;
+    ["male","female"].forEach(function(g) {
+      DB.classRoster[rk][g] = (DB.classRoster[rk][g] || []).filter(function(n){ return n !== name; });
+    });
+  });
+}
+
+function _addNameToRoster(name, strand, gender) {
+  var rk = strand;
+  if (!DB.classRoster[rk]) DB.classRoster[rk] = { male: [], female: [] };
+  var g = (gender && gender.toLowerCase() === "female") ? "female" : "male";
+  if (DB.classRoster[rk][g].indexOf(name) < 0) DB.classRoster[rk][g].push(name);
+}
+
+function _renameStudentInRosters(oldName, newName) {
+  for (var rk in DB.classRoster) {
+    ["male","female"].forEach(function(gen) {
+      var arr = DB.classRoster[rk][gen] || [];
+      for (var i = 0; i < arr.length; i++) { if (arr[i] === oldName) { arr[i] = newName; break; } }
+    });
+  }
+  for (var ck in rosterGrades) {
+    if (rosterGrades[ck][oldName] !== undefined) {
+      rosterGrades[ck][newName] = rosterGrades[ck][oldName];
+      delete rosterGrades[ck][oldName];
+    }
+  }
+}
+
+function _transferStudentStrand(stu, oldStrand, newStrand, newName, gender) {
+  _removeNameFromRoster(stu.name, oldStrand);
+  if (stu.name !== newName) _removeNameFromRoster(newName, oldStrand);
+  _addNameToRoster(newName, newStrand, gender || stu.gender);
+}
+
+function confirmDeleteStudent(stuId) {
+  var stu = findStudentById(stuId); if (!stu) return;
+  var card = document.getElementById("stmCard_" + stuId); if (!card) return;
+  card.innerHTML =
+    '<div class="stm-confirm-delete">' +
+      '<div class="stm-confirm-icon">⚠️</div>' +
+      '<div class="stm-confirm-text">' +
+        '<strong>Remove ' + stu.name + '?</strong>' +
+        '<span>This removes their account and grade records. This cannot be undone.</span>' +
+      '</div>' +
+      '<div class="stm-confirm-actions">' +
+        '<button class="stm-btn stm-btn-danger" onclick="deleteStudent(\'' + stuId + '\')">🗑️ Yes, Remove</button>' +
+        '<button class="stm-btn stm-btn-cancel" onclick="_refreshStmList()">✕ Cancel</button>' +
+      '</div>' +
+    '</div>';
+}
+
+function deleteStudent(stuId) {
+  var stu = findStudentById(stuId);
+  if (!stu) { showToast("⚠️ Student not found.", "warning"); return; }
+  var stuName = String(stu.name);
+
+  DB.students = DB.students.filter(function(s) { return s.id !== stuId; });
+  for (var rk in DB.classRoster) {
+    ["male","female"].forEach(function(g) {
+      DB.classRoster[rk][g] = (DB.classRoster[rk][g] || []).filter(function(n) { return n !== stuName; });
+    });
+  }
+  for (var ck in rosterGrades) {
+    if (rosterGrades[ck][stuName]) delete rosterGrades[ck][stuName];
+  }
+  saveInvites(loadInvites().filter(function(inv) { return inv.studentId !== stuId; }));
+  saveDB(); saveGrades();
+  showToast('🗑️ ' + stuName + ' removed.', 'warning');
+  _refreshStmList();
+  if (typeof renderGradebook   === 'function') renderGradebook(currentFolder, currentSection);
+  if (typeof renderClassRecord === 'function') renderClassRecord(currentFolder, currentSection);
+}
+
+function confirmRemoveRosterStudent(stuName, strand) {
+  stuName = String(stuName).trim();
+  var allCards = document.querySelectorAll('.stm-card');
+  var targetCard = null;
+  allCards.forEach(function(card) {
+    if (!card.id || card.id.indexOf('_r_') < 0) return;
+    var nameEl = card.querySelector('.stm-card-name');
+    if (nameEl && nameEl.textContent && nameEl.textContent.indexOf(stuName) >= 0) {
+      targetCard = card;
+    }
+  });
+  if (!targetCard) return;
+
+  targetCard.innerHTML =
+    '<div class="stm-confirm-delete">' +
+      '<div class="stm-confirm-icon">⚠️</div>' +
+      '<div class="stm-confirm-text">' +
+        '<strong>Remove ' + stuName + '?</strong>' +
+        '<span>This removes them from the class roster. This cannot be undone.</span>' +
+      '</div>' +
+      '<div class="stm-confirm-actions">' +
+        '<button class="stm-btn stm-btn-danger" ' +
+                'onclick="deleteRosterOnlyStudent(\'' + stuName.replace(/'/g, "\\'") + '\',\'' + strand + '\')">' +
+          '🗑️ Yes, Remove' +
+        '</button>' +
+        '<button class="stm-btn stm-btn-cancel" onclick="_refreshStmList()">✕ Cancel</button>' +
+      '</div>' +
+    '</div>';
+}
+
+function deleteRosterOnlyStudent(stuName, strand) {
+  stuName = String(stuName).trim();
+  var keys = [strand, strand.replace('HE-HO','HEHO'), strand.replace('HEHO','HE-HO')];
+  keys.forEach(function(rk) {
+    if (!DB.classRoster[rk]) return;
+    ['male','female'].forEach(function(g) {
+      DB.classRoster[rk][g] = (DB.classRoster[rk][g] || []).filter(function(n) { return n !== stuName; });
+    });
+  });
+  for (var ck in rosterGrades) {
+    if (rosterGrades[ck][stuName]) delete rosterGrades[ck][stuName];
+  }
+  saveDB(); saveGrades();
+  showToast('🗑️ ' + stuName + ' removed from roster.', 'warning');
+  _refreshStmList();
+  if (typeof renderGradebook   === 'function') renderGradebook(currentFolder, currentSection);
+  if (typeof renderClassRecord === 'function') renderClassRecord(currentFolder, currentSection);
+}
+
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape") {
+    var m = document.getElementById("studentManagerModal");
+    if (m && !m.classList.contains("hidden")) closeStudentManagerModal();
+  }
+});
